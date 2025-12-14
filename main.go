@@ -77,7 +77,7 @@ func videoProxy(w http.ResponseWriter, r *http.Request) {
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "5050"
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
