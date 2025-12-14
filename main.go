@@ -5,26 +5,25 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 )
 
 func videoProxy(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
-		http.Error(w, "Missing ?url parameter", http.StatusBadRequest)
+		http.Error(w, "Missing ?url", 400)
 		return
 	}
 
-	// PARSE & ENCODE ULANG (INI KUNCI)
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		http.Error(w, "Invalid video URL", http.StatusBadRequest)
+		http.Error(w, "Invalid URL", 400)
 		return
 	}
-	videoURL := parsed.String()
 
-	log.Println("▶ Streaming:", videoURL)
+	log.Println("▶ Streaming:", parsed.String())
 
-	req, err := http.NewRequest("GET", videoURL, nil)
+	req, err := http.NewRequest("GET", parsed.String(), nil)
 	if err != nil {
 		http.Error(w, "Request error", 500)
 		return
@@ -36,11 +35,13 @@ func videoProxy(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Origin", "https://embed.vidoycdn.com")
 	req.Header.Set("Accept", "*/*")
 
+	// Forward Range
 	if r.Header.Get("Range") != "" {
 		req.Header.Set("Range", r.Header.Get("Range"))
 	}
 
-	client := &http.Client{}
+	client := &http.Client{} // ❗ TANPA TIMEOUT
+
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "Fetch failed", 502)
@@ -48,10 +49,14 @@ func videoProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// === HEADER DULU ===
-	w.Header().Set("Content-Type", "video/mp4")
+	// === FORWARD HEADER DULU ===
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	} else {
+		w.Header().Set("Content-Type", "video/mp4")
+	}
+
 	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Disposition", `inline; filename="video.mp4"`)
 
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		w.Header().Set("Content-Length", cl)
@@ -60,13 +65,26 @@ func videoProxy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Range", cr)
 	}
 
+	w.Header().Set("Content-Disposition", `inline; filename="video.mp4"`)
+
+	// BARU status code
 	w.WriteHeader(resp.StatusCode)
+
+	// STREAM
 	io.Copy(w, resp.Body)
 }
 
 func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK"))
+	})
 	http.HandleFunc("/video", videoProxy)
 
-	log.Println("🚀 Proxy running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Println("🚀 Proxy running on :" + port)
+	log.Println(http.ListenAndServe(":"+port, nil))
 }
